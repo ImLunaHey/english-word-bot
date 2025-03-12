@@ -11,8 +11,16 @@ if (!username || !password) throw new Error('BLUESKY_USERNAME and BLUESKY_PASSWO
 
 const TEN_MINUTES = 1_000 * 60 * 10;
 
+const readFileOrReturnEmptyArray = (path: string) => {
+  try {
+    return readFileSync(path, 'utf8').split('\n');
+  } catch {
+    return [];
+  }
+};
+
 const wordArray = readFileSync(wordListPath, 'utf8').split('\n');
-const wordsPosted = readFileSync(postedWordListPath, 'utf8').split('\n');
+const wordsPosted = readFileOrReturnEmptyArray(postedWordListPath);
 
 const getRandomUnpostedWord = () => {
   const word = wordArray[Math.floor(Math.random() * wordArray.length)];
