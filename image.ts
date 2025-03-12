@@ -1,7 +1,7 @@
 import sharp from 'sharp';
 
 const WIDTH = 800;
-const HEIGHT = 400;
+const HEIGHT = 800;
 const MIN_FONT_SIZE = 32;
 const MAX_FONT_SIZE = 200;
 const PADDING = 40;
