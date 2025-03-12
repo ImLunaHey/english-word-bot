@@ -2,6 +2,7 @@ import 'dotenv/config';
 import { Bot } from '@skyware/bot';
 import wordListPath from 'word-list';
 import { readFileSync, writeFileSync } from 'fs';
+import cron from 'node-cron';
 
 const username = process.env.BLUESKY_USERNAME;
 const password = process.env.BLUESKY_PASSWORD;
@@ -43,15 +44,20 @@ const main = async () => {
 
   console.info(`bot logged in as ${username}`);
 
-  setInterval(async () => {
+  // every 10 minutes
+  cron.schedule('*/10 * * * *', async () => {
     const word = getRandomUnpostedWord();
-    writePostedWord(word);
+    try {
+      writePostedWord(word);
 
-    console.info(`posting word: ${word}`);
-    await bot.post({
-      text: word,
-    });
-  }, TEN_MINUTES);
+      console.info(`posting word: ${word}`);
+      await bot.post({
+        text: word,
+      });
+    } catch (error) {
+      console.error(`error posting word: ${word}`, error);
+    }
+  });
 };
 
 main().catch(console.error);
