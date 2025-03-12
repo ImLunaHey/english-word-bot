@@ -3,8 +3,10 @@
     "@atproto/api": "^0.14.9",
     "@skyware/bot": "^0.3.8",
     "@skyware/jetstream": "^0.2.2",
+    "@types/sharp": "^0.31.1",
     "dotenv": "^16.4.7",
     "node-cron": "^3.0.3",
+    "sharp": "^0.33.5",
     "tsx": "^4.19.3",
     "word-list": "^4.1.0"
   },
