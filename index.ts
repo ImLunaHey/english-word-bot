@@ -23,9 +23,24 @@ const readFileOrReturnEmptyArray = (path: string) => {
 const wordArray = readFileSync(wordListPath, 'utf8').split('\n');
 const wordsPosted = readFileOrReturnEmptyArray(postedWordListPath);
 
-const getRandomUnpostedWord = () => {
-  const word = wordArray[Math.floor(Math.random() * wordArray.length)];
-  if (wordsPosted.includes(word)) return getRandomUnpostedWord();
+// sort wordArray, such that all words between [0, wordArray.length - wordsPosted.length) are valid
+wordArray.sort((a, b) => {
+    const weightA = wordsUsed.includes(a)? 1: 0;
+    const weightB = wordsUsed.includes(b)? 1: 0;
+    return weightA - weightB;
+});
+
+const getRandomUnpostedWordAndSwapItToLast = () => {
+  const wordIdx = Math.floor(Math.random() * (wordArray.length - wordsPosted.length));
+  const word = wordArray[wordIdx];
+  const lastRelevantIdx = wordArray.length - wordsPosted.length - 1; // 0 indexed arrays needs this -1
+
+  // if the index is not the last relevant one, we need to swap things
+  if (wordIdx != lastRelevantIdx) {
+      const tmp = wordArray[lastRelevantIdx];
+      wordArray[lastRelevantIdx] = wordArray[wordIdx]; // technically this line is irrelevant
+      wordArray[wordIdx] = tmp;
+  }
   return word;
 };
 
@@ -51,7 +66,7 @@ const main = async () => {
 
   // every 10 minutes
   cron.schedule('*/10 * * * *', async () => {
-    const word = getRandomUnpostedWord();
+    const word = getRandomUnpostedWordAndSwapItToLast();
     try {
       writePostedWord(word);
 
