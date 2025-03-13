@@ -59,7 +59,7 @@ const main = async () => {
     try {
       writePostedWord(word);
 
-      const imageBuffer = await createWordImage(word, '@EnglishWordBot');
+      const imageBuffer = await createWordImage(word, `@${username}`);
       const blob = new Blob([imageBuffer], { type: 'image/png' });
 
       console.info(`posting word: ${word}`);
