@@ -47,6 +47,10 @@ const main = async () => {
 
   await agent.resumeSession(session);
 
+  bot.on('error', (error) => {
+    console.error(`error: ${error}`);
+  });
+
   console.info(`bot logged in as ${username}`);
 
   // every 10 minutes
