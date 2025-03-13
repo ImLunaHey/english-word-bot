@@ -21,17 +21,21 @@ const readFileOrReturnEmptyArray = (path: string) => {
 };
 
 const wordArray = readFileSync(wordListPath, 'utf8').split('\n');
-const wordsPosted = readFileOrReturnEmptyArray(postedWordListPath);
+const wordsPosted = new Set(readFileOrReturnEmptyArray(postedWordListPath));
+const getUnpostedWords = () => wordArray.filter((word) => !wordsPosted.has(word));
 
-const getRandomUnpostedWord = () => {
-  const word = wordArray[Math.floor(Math.random() * wordArray.length)];
-  if (wordsPosted.includes(word)) return getRandomUnpostedWord();
-  return word;
+const getRandomElement = <T>(array: T[]): T => array[Math.floor(Math.random() * array.length)];
+
+const getRandomUnpostedWord = (): string => {
+  const availableWords = getUnpostedWords();
+  if (availableWords.length === 0) throw new Error('All words have been posted already');
+
+  return getRandomElement(availableWords);
 };
 
 const writePostedWord = (word: string) => {
-  wordsPosted.push(word);
-  writeFileSync(postedWordListPath, wordsPosted.join('\n'), 'utf8');
+  wordsPosted.add(word);
+  writeFileSync(postedWordListPath, Array.from(wordsPosted).join('\n'), 'utf8');
 };
 
 const main = async () => {
