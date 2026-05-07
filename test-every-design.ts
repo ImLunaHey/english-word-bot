@@ -1,24 +1,13 @@
-import sharp from 'sharp';
 import { mkdirSync, readFileSync, writeFileSync } from 'fs';
 import { join } from 'path';
 import wordListPath from 'word-list';
 import { fetchWordData } from './dictionary';
 import { ALL_DESIGNS, renderDesign } from './designs';
+import { DESIGN_WIDTH, DESIGN_HEIGHT, rasterizeSvg } from './image';
 
-const WIDTH = 800;
-const HEIGHT = 800;
 const WATERMARK = '@englishwordbot.bsky.social';
 const OUT_DIR = process.env.TEST_OUTPUT_DIR ?? './test-output';
 const WORDS = readFileSync(wordListPath, 'utf8').split('\n').filter(Boolean);
-
-async function renderToBuffer(svg: string): Promise<Buffer> {
-  return sharp({
-    create: { width: WIDTH, height: HEIGHT, channels: 4, background: { r: 0, g: 0, b: 0, alpha: 1 } },
-  })
-    .composite([{ input: Buffer.from(svg), top: 0, left: 0 }])
-    .png()
-    .toBuffer();
-}
 
 function shuffle<T>(arr: T[]): T[] {
   const copy = arr.slice();
@@ -47,11 +36,11 @@ async function main() {
       console.log(`  [skip] could not find renderable word for ${design.name}`);
       continue;
     }
-    const svg = renderDesign(design, { data: chosen.data, watermark: WATERMARK, width: WIDTH, height: HEIGHT });
-    const buf = await renderToBuffer(svg);
+    const svg = renderDesign(design, { data: chosen.data, watermark: WATERMARK, width: DESIGN_WIDTH, height: DESIGN_HEIGHT });
+    const buf = await rasterizeSvg(svg);
     const out = join(OUT_DIR, `every-${design.name}-${chosen.word}.png`);
     writeFileSync(out, buf);
-    console.log(`  ${design.name} <- ${chosen.word}`);
+    console.log(`  ${design.name} <- ${chosen.word} (${(buf.length / 1024).toFixed(0)} KB)`);
   }
 }
 

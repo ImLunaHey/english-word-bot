@@ -1,23 +1,12 @@
-import sharp from 'sharp';
 import { mkdirSync, readFileSync, writeFileSync } from 'fs';
 import { join } from 'path';
 import wordListPath from 'word-list';
 import { fetchWordData } from './dictionary';
 import { ALL_DESIGNS, pickDesign, renderDesign } from './designs';
+import { DESIGN_WIDTH, DESIGN_HEIGHT, rasterizeSvg } from './image';
 
-const WIDTH = 800;
-const HEIGHT = 800;
 const WATERMARK = '@englishwordbot.bsky.social';
 const OUT_DIR = process.env.TEST_OUTPUT_DIR ?? './test-output';
-
-async function renderToBuffer(svg: string): Promise<Buffer> {
-  return sharp({
-    create: { width: WIDTH, height: HEIGHT, channels: 4, background: { r: 0, g: 0, b: 0, alpha: 1 } },
-  })
-    .composite([{ input: Buffer.from(svg), top: 0, left: 0 }])
-    .png()
-    .toBuffer();
-}
 
 async function main() {
   const allWords = readFileSync(wordListPath, 'utf8').split('\n').filter(Boolean);
@@ -41,15 +30,15 @@ async function main() {
       continue;
     }
     const design = pickDesign(data);
-    const ctx = { data, watermark: WATERMARK, width: WIDTH, height: HEIGHT };
+    const ctx = { data, watermark: WATERMARK, width: DESIGN_WIDTH, height: DESIGN_HEIGHT };
     try {
       const svg = renderDesign(design, ctx);
-      const buf = await renderToBuffer(svg);
+      const buf = await rasterizeSvg(svg);
       const out = join(OUT_DIR, `deck-${String(succeeded + 1).padStart(2, '0')}-${word}-${design.name}.png`);
       writeFileSync(out, buf);
       usedDesigns.add(design.name);
       succeeded++;
-      console.log(`  [${succeeded}/${N}] ${word} -> ${design.name}`);
+      console.log(`  [${succeeded}/${N}] ${word} -> ${design.name} (${(buf.length / 1024).toFixed(0)} KB)`);
     } catch (e) {
       console.error(`  [error] ${word} (${design.name}):`, (e as Error).message);
     }
