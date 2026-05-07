@@ -1,10 +1,27 @@
 import sharp from 'sharp';
+import * as opentype from 'opentype.js';
+import { readFileSync } from 'fs';
+import { join } from 'path';
 
 const WIDTH = 800;
 const HEIGHT = 800;
 const MIN_FONT_SIZE = 32;
 const MAX_FONT_SIZE = 200;
+const WATERMARK_FONT_SIZE = 14;
 const PADDING = 40;
+
+const fontBuffer = readFileSync(join(__dirname, 'fonts', 'LiberationSans-Bold.ttf'));
+const font = opentype.parse(fontBuffer.buffer.slice(fontBuffer.byteOffset, fontBuffer.byteOffset + fontBuffer.byteLength));
+
+function textToPath(text: string, fontSize: number, cx: number, cy: number): string {
+  const measured = font.getPath(text, 0, 0, fontSize);
+  const bbox = measured.getBoundingBox();
+  const width = bbox.x2 - bbox.x1;
+  const height = bbox.y2 - bbox.y1;
+  const x = cx - width / 2 - bbox.x1;
+  const y = cy - height / 2 - bbox.y1;
+  return font.getPath(text, x, y, fontSize).toPathData(2);
+}
 
 // Design variations
 const DESIGNS = [
@@ -264,7 +281,15 @@ function createAurora(opacity: number): string {
 export async function createWordImage(word: string, watermark: string): Promise<Buffer> {
   const design = DESIGNS[Math.floor(Math.random() * DESIGNS.length)];
   const availableWidth = WIDTH - PADDING * 2;
-  const fontSize = Math.max(MIN_FONT_SIZE, Math.min(MAX_FONT_SIZE, Math.floor(availableWidth / (word.length * 0.8))));
+
+  let fontSize = MAX_FONT_SIZE;
+  const advanceAtMax = font.getAdvanceWidth(word, MAX_FONT_SIZE);
+  if (advanceAtMax > availableWidth) {
+    fontSize = Math.max(MIN_FONT_SIZE, Math.floor((MAX_FONT_SIZE * availableWidth) / advanceAtMax));
+  }
+
+  const wordPath = textToPath(word, fontSize, WIDTH / 2, HEIGHT / 2);
+  const watermarkPath = textToPath(watermark, WATERMARK_FONT_SIZE, WIDTH / 2, HEIGHT - 20);
 
   const decorativeElements = design.decorative.map((element) => generateDecorativeElement(element)).join('\n');
 
@@ -283,37 +308,18 @@ export async function createWordImage(word: string, watermark: string): Promise<
                     </feMerge>
                 </filter>
             </defs>
-            
+
             <!-- Background -->
             <rect width="100%" height="100%" fill="url(#backgroundGradient)"/>
-            
+
             <!-- Decorative elements -->
             ${decorativeElements}
-            
+
             <!-- Main text -->
-            <text
-                x="50%"
-                y="50%"
-                dy="0.35em"
-                text-anchor="middle"
-                dominant-baseline="middle"
-                font-size="${fontSize}px"
-                fill="${design.glow.color}"
-                font-family="Arial, sans-serif"
-                font-weight="bold"
-                filter="url(#glow)"
-            >${word}</text>
-            
+            <path d="${wordPath}" fill="${design.glow.color}" filter="url(#glow)"/>
+
             <!-- Watermark -->
-            <text
-                x="50%"
-                y="${HEIGHT - 20}"
-                text-anchor="middle"
-                font-family="Arial, sans-serif"
-                font-size="14px"
-                fill="white"
-                fill-opacity="0.5"
-            >${watermark}</text>
+            <path d="${watermarkPath}" fill="white" fill-opacity="0.5"/>
         </svg>
     `;
 
