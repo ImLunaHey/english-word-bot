@@ -134,3 +134,12 @@ dist
 .yarn/build-state.yml
 .yarn/install-state.gz
 .pnp.*
+
+# bot data
+postedWords.txt
+wordCache.json
+test-wordCache.json
+test-output/
+
+# macOS
+.DS_Store

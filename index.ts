@@ -55,26 +55,34 @@ const main = async () => {
 
   // every 10 minutes
   cron.schedule('*/10 * * * *', async () => {
-    const word = getRandomUnpostedWord();
-    try {
-      writePostedWord(word);
-
-      const imageBuffer = await createWordImage(word, `@${username}`);
-      const blob = new Blob([imageBuffer], { type: 'image/png' });
-
-      console.info(`posting word: ${word}`);
-      await bot.post({
-        text: '',
-        images: [
-          {
-            alt: `The word "${word}" on a stylized background`,
-            data: blob,
-          },
-        ],
-      });
-    } catch (error) {
-      console.error(`error posting word: ${word}`, error);
+    for (let attempt = 0; attempt < 10; attempt++) {
+      const word = getRandomUnpostedWord();
+      try {
+        const imageBuffer = await createWordImage(word, `@${username}`);
+        if (!imageBuffer) {
+          writePostedWord(word);
+          console.info(`skipped word (no data): ${word}`);
+          continue;
+        }
+        writePostedWord(word);
+        const blob = new Blob([imageBuffer], { type: 'image/png' });
+        console.info(`posting word: ${word}`);
+        await bot.post({
+          text: '',
+          images: [
+            {
+              alt: `The word "${word}" on a stylized background`,
+              data: blob,
+            },
+          ],
+        });
+        return;
+      } catch (error) {
+        console.error(`error posting word: ${word}`, error);
+        return;
+      }
     }
+    console.error('could not find a postable word in 10 attempts');
   });
 };
 
