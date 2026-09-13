@@ -42,7 +42,7 @@ impl WordPool {
     }
 
     pub fn choose<R: Rng + ?Sized>(&self, rng: &mut R) -> Option<&str> {
-        let available = self.words.len().saturating_sub(self.posted.len());
+        let available = self.remaining();
         if available == 0 {
             return None;
         }
@@ -131,6 +131,17 @@ mod tests {
     fn exhausted_pool_returns_none() {
         let p = WordPool::new(["one".into()], ["one".into()]).unwrap();
         assert_eq!(p.choose(&mut StdRng::seed_from_u64(1)), None);
+    }
+    #[test]
+    fn posted_words_outside_the_current_dictionary_do_not_affect_selection() {
+        let pool = WordPool::new(
+            ["one".into(), "two".into()],
+            ["removed-from-dictionary".into()],
+        )
+        .unwrap();
+        let mut rng = StdRng::seed_from_u64(2);
+        assert!(matches!(pool.choose(&mut rng), Some("one" | "two")));
+        assert_eq!(pool.remaining(), 2);
     }
     #[test]
     fn mark_is_idempotent() {
