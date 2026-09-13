@@ -6,7 +6,7 @@ pub const RENDER_SCALE: u32 = 3;
 pub const RENDER_SIZE: u32 = DESIGN_SIZE * RENDER_SCALE;
 
 pub fn render_png(design: Design, data: &WordData, watermark: &str) -> Result<Vec<u8>> {
-    let svg = design.render(data, watermark, DESIGN_SIZE, DESIGN_SIZE);
+    let svg = design.render(data, watermark, DESIGN_SIZE, DESIGN_SIZE)?;
     let mut options = resvg::usvg::Options::default();
     options
         .fontdb_mut()
@@ -17,6 +17,12 @@ pub fn render_png(design: Design, data: &WordData, watermark: &str) -> Result<Ve
     options
         .fontdb_mut()
         .load_font_data(include_bytes!("../fonts/LiberationSerif-Regular.ttf").to_vec());
+    options
+        .fontdb_mut()
+        .load_font_data(include_bytes!("../fonts/LiberationSerif-Italic.ttf").to_vec());
+    options
+        .fontdb_mut()
+        .load_font_data(include_bytes!("../fonts/LiberationMono-Regular.ttf").to_vec());
     let tree = resvg::usvg::Tree::from_str(&svg, &options).context("parse generated SVG")?;
     let mut pixmap = resvg::tiny_skia::Pixmap::new(RENDER_SIZE, RENDER_SIZE)
         .context("allocate render buffer")?;
@@ -37,10 +43,10 @@ mod tests {
             word: "test".into(),
             part_of_speech: "noun".into(),
             definition: "A procedure intended to establish quality.".into(),
-            example: None,
+            example: Some("This is a test in context.".into()),
             ipa: Some("tɛst".into()),
-            etymology: None,
-            origin_language: None,
+            etymology: Some("From Middle English test.".into()),
+            origin_language: Some("Middle English".into()),
         }
     }
     #[test]
@@ -64,6 +70,20 @@ mod tests {
                 "{}",
                 design.name
             )
+        }
+    }
+
+    #[test]
+    fn every_design_rasterizes_long_unicode_content() {
+        let mut data = word();
+        data.word = "pneumonoultramicroscopicsilicovolcanoconiosis".into();
+        data.part_of_speech = "incredibly-long-part-of-speech".into();
+        data.definition = "A deliberately long definition with punctuation, accents such as café, and XML-sensitive characters like <, >, and & that exercises wrapping and escaping across every native card renderer.".into();
+        data.example = Some("An unusually long example still needs to render safely without relying on a JavaScript layout engine.".into());
+
+        for design in ALL_DESIGNS {
+            let png = render_png(*design, &data, "@a-very-long-test-handle.example").unwrap();
+            assert_eq!(&png[..8], b"\x89PNG\r\n\x1a\n", "{}", design.name);
         }
     }
 }
