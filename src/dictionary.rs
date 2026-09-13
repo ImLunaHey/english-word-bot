@@ -59,15 +59,14 @@ impl Dictionary {
         if let Some(data) = result
             .as_mut()
             .filter(|d| d.ipa.is_none() || d.etymology.is_none())
+            && let Some((ipa, etymology)) = self.wiktionary_enrichment(word).await
         {
-            if let Some((ipa, etymology)) = self.wiktionary_enrichment(word).await {
-                data.ipa = data.ipa.take().or(ipa);
-                data.etymology = data.etymology.take().or(etymology);
-                data.origin_language = data
-                    .origin_language
-                    .take()
-                    .or_else(|| data.etymology.as_deref().and_then(detect_origin_language));
-            }
+            data.ipa = data.ipa.take().or(ipa);
+            data.etymology = data.etymology.take().or(etymology);
+            data.origin_language = data
+                .origin_language
+                .take()
+                .or_else(|| data.etymology.as_deref().and_then(detect_origin_language));
         }
         if let Err(error) = self.cache.insert(word, &result) {
             eprintln!("failed to cache {word}: {error:#}");
