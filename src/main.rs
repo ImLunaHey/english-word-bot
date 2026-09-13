@@ -55,7 +55,7 @@ async fn main() -> Result<()> {
     let config = Config::from_env()?;
     let bot = Bot::new(BotConfig::default());
     bot.login(&config.username, &config.password).await?;
-    eprintln!("bot logged in as {}", config.username);
+    println!("bot logged in as {}", config.username);
 
     let words = english_words();
     let posted = std::fs::read_to_string(&config.posted_path).unwrap_or_default();
@@ -96,7 +96,7 @@ async fn post_next(
         };
         let Some(data) = dictionary.fetch(&word).await else {
             pool.mark_posted(&word, posted_path)?;
-            eprintln!("skipped word (no data): {word}");
+            println!("skipped word (no data): {word}");
             continue;
         };
         let png = render_png(design_for(&word), &data, watermark)?;
@@ -114,7 +114,7 @@ async fn post_next(
         });
         bot.post(payload).await?;
         pool.mark_posted(&word, posted_path)?;
-        eprintln!("posted word: {word}");
+        println!("posted word: {word}");
         return Ok(());
     }
     bail!("could not find a postable word in 10 attempts")
