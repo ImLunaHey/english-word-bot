@@ -2,7 +2,7 @@
 name = "english-word-bot"
 version = "0.2.0"
 edition = "2024"
-rust-version = "1.85.1"
+rust-version = "1.88.0"
 
 [dependencies]
 anyhow = "1"
