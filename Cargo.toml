@@ -3,6 +3,7 @@ name = "english-word-bot"
 version = "0.2.0"
 edition = "2024"
 rust-version = "1.88.0"
+default-run = "english-word-bot"
 
 [dependencies]
 anyhow = "1"
