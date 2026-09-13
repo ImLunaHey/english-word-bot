@@ -5,6 +5,8 @@ a generated PNG with a stylised background. Words are drawn from the
 embedded English dictionaries and
 tracked in an atomically updated local file so they never repeat.
 
+See the [complete design gallery](docs/DESIGN_GALLERY.md) for previews of all 44 card styles.
+
 ## Run it
 
 ```bash
@@ -26,6 +28,9 @@ Optional:
 - Renders the word as SVG → PNG via `resvg`
 - Posts via `bluesky-bot` with descriptive alt text
 
+The scheduler, dictionary lookup, persistence, all 44 card renderers, image rasterization, and
+Bluesky client run natively in Rust. There is no Node or JavaScript runtime dependency.
+
 ## Deploy
 
 `railway.json` is included for one-click Railway deploys.
@@ -41,4 +46,10 @@ Render any named design locally with:
 
 ```bash
 cargo run --bin render-sample -- receipt sample.png
+```
+
+Regenerate the checked-in design gallery with:
+
+```bash
+cargo run --bin render-sample -- --gallery
 ```

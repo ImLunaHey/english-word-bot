@@ -3,6 +3,7 @@ use regex::Regex;
 use serde::{Deserialize, Serialize};
 
 const USER_AGENT: &str = "englishwordbot/2.0 (https://bsky.app/profile/englishwordbot.bsky.social)";
+const CACHE_VERSION: &str = "v2";
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -49,7 +50,8 @@ impl Dictionary {
     }
 
     pub async fn fetch(&mut self, word: &str) -> Option<WordData> {
-        if let Some(value) = self.cache.get::<Option<WordData>>(word) {
+        let cache_key = format!("{CACHE_VERSION}:{word}");
+        if let Some(value) = self.cache.get::<Option<WordData>>(&cache_key) {
             return value;
         }
         let mut result = self.dictionary_api(word).await;
@@ -68,7 +70,7 @@ impl Dictionary {
                 .take()
                 .or_else(|| data.etymology.as_deref().and_then(detect_origin_language));
         }
-        if let Err(error) = self.cache.insert(word, &result) {
+        if let Err(error) = self.cache.insert(cache_key, &result) {
             eprintln!("failed to cache {word}: {error:#}");
         }
         result
@@ -163,6 +165,22 @@ impl Dictionary {
     }
 
     async fn wiktionary_enrichment(&self, word: &str) -> Option<(Option<String>, Option<String>)> {
+        let source = self.wiktionary_wikitext(word).await?;
+        let section = english_section(&source);
+        let mut enrichment = (extract_ipa(section), extract_etymology(section));
+        if (enrichment.0.is_none() || enrichment.1.is_none())
+            && let Some(target) = extract_enrichment_target(section)
+            && target != word
+            && let Some(target_source) = self.wiktionary_wikitext(&target).await
+        {
+            let target_section = english_section(&target_source);
+            enrichment.0 = enrichment.0.or_else(|| extract_ipa(target_section));
+            enrichment.1 = enrichment.1.or_else(|| extract_etymology(target_section));
+        }
+        Some(enrichment)
+    }
+
+    async fn wiktionary_wikitext(&self, word: &str) -> Option<String> {
         let url = format!(
             "{}/w/api.php?action=parse&page={}&prop=wikitext&format=json&formatversion=2",
             self.wiktionary_base,
@@ -179,8 +197,7 @@ impl Dictionary {
             .json()
             .await
             .ok()?;
-        let source = english_section(json.pointer("/parse/wikitext")?.as_str()?);
-        Some((extract_ipa(source), extract_etymology(source)))
+        json.pointer("/parse/wikitext")?.as_str().map(str::to_owned)
     }
 }
 
@@ -213,9 +230,12 @@ fn english_section(value: &str) -> &str {
     let Some((_, after)) = value.split_once("==English==") else {
         return value;
     };
-    after
-        .split_once("\n==")
-        .map_or(after, |(section, _)| section)
+    // A language starts with exactly two '=' characters. Subsections such as
+    // `===Etymology===` must stay in the English section.
+    let end = after
+        .match_indices("\n==")
+        .find_map(|(index, _)| (!after[index + 3..].starts_with('=')).then_some(index));
+    end.map_or(after, |index| &after[..index])
 }
 fn extract_ipa(value: &str) -> Option<String> {
     Regex::new(r"\{\{IPA\|en\|([^}|]+)")
@@ -223,18 +243,43 @@ fn extract_ipa(value: &str) -> Option<String> {
         .captures(value)
         .map(|c| clean_ipa(c[1].trim()))
 }
+fn extract_enrichment_target(value: &str) -> Option<String> {
+    for pattern in [
+        r"\{\{(?:infl of|inflection of)\|en\|([^|}]+)",
+        r"(?i)See\s+\{\{m\|en\|([^|}]+)",
+    ] {
+        if let Some(capture) = Regex::new(pattern).unwrap().captures(value) {
+            return Some(capture[1].trim().to_owned());
+        }
+    }
+    None
+}
 fn extract_etymology(value: &str) -> Option<String> {
     let capture = Regex::new(r"(?s)===\s*Etymology(?:\s+\d+)?\s*===\s*\n(.*?)(?:\n===|\z)")
         .unwrap()
         .captures(value)?;
+    let languages = capture[1]
+        .replace("{{der|en|enm|", " Middle English ")
+        .replace("{{inh|en|enm|", " Middle English ")
+        .replace("{{m|enm|", " Middle English ")
+        .replace("{{der|en|ang|", " Old English ")
+        .replace("{{inh|en|ang|", " Old English ")
+        .replace("{{m|ang|", " Old English ")
+        .replace("{{der|en|dum|", " Middle Dutch ")
+        .replace("{{inh|en|dum|", " Middle Dutch ")
+        .replace("{{m|dum|", " Middle Dutch ")
+        .replace("enm:", "Middle English ")
+        .replace("ang:", "Old English ")
+        .replace("dum:", "Middle Dutch ");
     let links = Regex::new(r"\[\[(?:[^]|]+\|)?([^]]+)\]\]")
         .unwrap()
-        .replace_all(&capture[1], "$1");
+        .replace_all(&languages, "$1");
     let templates = Regex::new(r"\{\{[^}]*\}\}")
         .unwrap()
         .replace_all(&links, "");
     let tags = Regex::new(r"<[^>]+>").unwrap().replace_all(&templates, "");
     let text = tags
+        .replace("}}", "")
         .replace("'''", "")
         .replace("''", "")
         .split_whitespace()
@@ -263,6 +308,7 @@ fn detect_origin_language(value: &str) -> Option<String> {
         "French",
         "Old English",
         "Middle English",
+        "English",
         "Anglo-Saxon",
         "Old High German",
         "Proto-Germanic",
@@ -271,6 +317,7 @@ fn detect_origin_language(value: &str) -> Option<String> {
         "Spanish",
         "Portuguese",
         "Dutch",
+        "Middle Dutch",
         "Arabic",
         "Hebrew",
         "Sanskrit",
@@ -297,7 +344,7 @@ mod tests {
     use super::*;
     use wiremock::{
         Mock, MockServer, ResponseTemplate,
-        matchers::{method, path},
+        matchers::{method, path, query_param},
     };
     #[test]
     fn cleans_ipa_delimiters() {
@@ -318,6 +365,40 @@ mod tests {
             english_section("==French==\nx\n==English==\ny\n==German==\nz").trim(),
             "y"
         )
+    }
+    #[test]
+    fn english_section_keeps_pronunciation_and_etymology_subsections() {
+        let source = "==English==\n===Etymology===\nFrom [[Old English]].\n===Pronunciation===\n{{IPA|en|/kɒkni/}}\n===Noun===\nA person.\n==French==\nother";
+        let section = english_section(source);
+        assert!(section.contains("===Etymology==="));
+        assert!(section.contains("{{IPA|en|/kɒkni/}}"));
+        assert!(!section.contains("French"));
+    }
+    #[test]
+    fn posted_word_regressions_extract_enrichment() {
+        let cockney =
+            "==English==\n===Etymology===\nSee {{m|en|Cockney}}.\n===Pronunciation===\n===Noun===";
+        let swabbing =
+            "==English==\n===Verb===\n{{head|en|verb form}}\n# {{infl of|en|swab||ing-form}}";
+        assert_eq!(
+            extract_enrichment_target(english_section(cockney)).as_deref(),
+            Some("Cockney")
+        );
+        assert_eq!(
+            extract_enrichment_target(english_section(swabbing)).as_deref(),
+            Some("swab")
+        );
+    }
+    #[test]
+    fn preserves_languages_encoded_in_etymology_templates() {
+        let source = "===Etymology===\nBack-formation from {{der|en|enm|swabber}}, from {{der|en|dum|zwabber}}.\n===Noun===";
+        let etymology = extract_etymology(source).unwrap();
+        assert!(etymology.contains("Middle English"));
+        assert!(etymology.contains("Middle Dutch"));
+        assert_eq!(
+            detect_origin_language(&etymology).as_deref(),
+            Some("Middle English")
+        );
     }
     #[test]
     fn extracts_ipa_template() {
@@ -371,6 +452,74 @@ mod tests {
         assert_eq!(result.origin_language.as_deref(), Some("Old English"));
     }
     #[tokio::test]
+    async fn enriches_an_inflected_word_from_its_lemma() {
+        let server = MockServer::start().await;
+        Mock::given(method("GET"))
+            .and(path("/api/v2/entries/en/swabbing"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!([{
+                "meanings":[{"partOfSpeech":"verb","definitions":[{"definition":"Cleaning with a swab."}]}]
+            }])))
+            .mount(&server)
+            .await;
+        Mock::given(method("GET"))
+            .and(path("/w/api.php"))
+            .and(query_param("page", "swabbing"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                "parse":{"wikitext":"==English==\n===Verb===\n{{infl of|en|swab||ing-form}}"}
+            })))
+            .mount(&server)
+            .await;
+        Mock::given(method("GET"))
+            .and(path("/w/api.php"))
+            .and(query_param("page", "swab"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                "parse":{"wikitext":"==English==\n===Etymology===\nBack-formation from {{der|en|enm|swabber}}.\n===Pronunciation===\n{{IPA|en|/swɒb/}}\n===Noun==="}
+            })))
+            .mount(&server)
+            .await;
+        let mut dictionary =
+            Dictionary::with_endpoints(JsonCache::disabled(), server.uri(), server.uri());
+        let result = dictionary.fetch("swabbing").await.unwrap();
+        assert_eq!(result.ipa.as_deref(), Some("swɒb"));
+        assert_eq!(result.origin_language.as_deref(), Some("Middle English"));
+    }
+    #[tokio::test]
+    async fn follows_a_wiktionary_see_reference_for_enrichment() {
+        let server = MockServer::start().await;
+        Mock::given(method("GET"))
+            .and(path("/api/v2/entries/en/cockney"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!([{
+                "meanings":[{"partOfSpeech":"noun","definitions":[{"definition":"A Londoner."}]}]
+            }])))
+            .mount(&server)
+            .await;
+        for (page, wikitext) in [
+            (
+                "cockney",
+                "==English==\n===Etymology===\nSee {{m|en|Cockney}}.\n===Noun===",
+            ),
+            (
+                "Cockney",
+                "==English==\n===Etymology===\nFrom {{inh|en|enm|cokenay}}.\n===Pronunciation===\n{{IPA|en|/ˈkɒk.ni/}}\n===Noun===",
+            ),
+        ] {
+            Mock::given(method("GET"))
+                .and(path("/w/api.php"))
+                .and(query_param("page", page))
+                .respond_with(
+                    ResponseTemplate::new(200)
+                        .set_body_json(serde_json::json!({"parse":{"wikitext":wikitext}})),
+                )
+                .mount(&server)
+                .await;
+        }
+        let mut dictionary =
+            Dictionary::with_endpoints(JsonCache::disabled(), server.uri(), server.uri());
+        let result = dictionary.fetch("cockney").await.unwrap();
+        assert_eq!(result.ipa.as_deref(), Some("ˈkɒk.ni"));
+        assert_eq!(result.origin_language.as_deref(), Some("Middle English"));
+    }
+    #[tokio::test]
     async fn falls_back_to_wiktionary_definition() {
         let server = MockServer::start().await;
         Mock::given(method("GET")).and(path("/api/rest_v1/page/definition/test")).respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({"en":[{"partOfSpeech":"noun","definitions":[{"definition":"A <b>trial</b>.","examples":["A test."]}]}]}))).mount(&server).await;
@@ -404,7 +553,9 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let cache_path = dir.path().join("cache.json");
         let mut cache = JsonCache::open(Some(&cache_path)).unwrap();
-        cache.insert("missing", &Option::<WordData>::None).unwrap();
+        cache
+            .insert("v2:missing", &Option::<WordData>::None)
+            .unwrap();
         assert!(
             Dictionary::with_endpoints(cache, server.uri(), server.uri())
                 .fetch("missing")

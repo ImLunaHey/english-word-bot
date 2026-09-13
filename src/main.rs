@@ -99,7 +99,7 @@ async fn post_next(
             println!("skipped word (no data): {word}");
             continue;
         };
-        let png = render_png(design_for(&word), &data, watermark)?;
+        let png = render_png(design_for(&data), &data, watermark)?;
         let blob = bot.upload_blob(png, "image/png").await?;
         let mut payload = PostPayload::new("");
         payload.embed = Some(PostEmbed::Images {
