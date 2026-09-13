@@ -3,7 +3,7 @@ use regex::Regex;
 use serde::{Deserialize, Serialize};
 
 const USER_AGENT: &str = "englishwordbot/2.0 (https://bsky.app/profile/englishwordbot.bsky.social)";
-const CACHE_VERSION: &str = "v2";
+const CACHE_VERSION: &str = "v3";
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -168,14 +168,27 @@ impl Dictionary {
         let source = self.wiktionary_wikitext(word).await?;
         let section = english_section(&source);
         let mut enrichment = (extract_ipa(section), extract_etymology(section));
-        if (enrichment.0.is_none() || enrichment.1.is_none())
+        if (enrichment.0.is_none()
+            || enrichment
+                .1
+                .as_deref()
+                .and_then(detect_origin_language)
+                .is_none())
             && let Some(target) = extract_enrichment_target(section)
             && target != word
             && let Some(target_source) = self.wiktionary_wikitext(&target).await
         {
             let target_section = english_section(&target_source);
             enrichment.0 = enrichment.0.or_else(|| extract_ipa(target_section));
-            enrichment.1 = enrichment.1.or_else(|| extract_etymology(target_section));
+            let target_etymology = extract_etymology(target_section);
+            if enrichment
+                .1
+                .as_deref()
+                .and_then(detect_origin_language)
+                .is_none()
+            {
+                enrichment.1 = target_etymology;
+            }
         }
         Some(enrichment)
     }
@@ -258,19 +271,14 @@ fn extract_etymology(value: &str) -> Option<String> {
     let capture = Regex::new(r"(?s)===\s*Etymology(?:\s+\d+)?\s*===\s*\n(.*?)(?:\n===|\z)")
         .unwrap()
         .captures(value)?;
-    let languages = capture[1]
-        .replace("{{der|en|enm|", " Middle English ")
-        .replace("{{inh|en|enm|", " Middle English ")
-        .replace("{{m|enm|", " Middle English ")
-        .replace("{{der|en|ang|", " Old English ")
-        .replace("{{inh|en|ang|", " Old English ")
-        .replace("{{m|ang|", " Old English ")
-        .replace("{{der|en|dum|", " Middle Dutch ")
-        .replace("{{inh|en|dum|", " Middle Dutch ")
-        .replace("{{m|dum|", " Middle Dutch ")
-        .replace("enm:", "Middle English ")
-        .replace("ang:", "Old English ")
-        .replace("dum:", "Middle Dutch ");
+    let origin_template = Regex::new(r"\{\{(?:der|inh|bor|lbor|obor)\|en\|([^|}]+)\|").unwrap();
+    let mention_template = Regex::new(r"\{\{m\|([^|}]+)\|").unwrap();
+    let languages = origin_template.replace_all(&capture[1], |captures: &regex::Captures| {
+        language_name(&captures[1]).unwrap_or("").to_owned() + " "
+    });
+    let languages = mention_template.replace_all(&languages, |captures: &regex::Captures| {
+        language_name(&captures[1]).unwrap_or("").to_owned() + " "
+    });
     let links = Regex::new(r"\[\[(?:[^]|]+\|)?([^]]+)\]\]")
         .unwrap()
         .replace_all(&languages, "$1");
@@ -291,6 +299,40 @@ fn extract_etymology(value: &str) -> Option<String> {
         } else {
             text
         }
+    })
+}
+
+fn language_name(code: &str) -> Option<&'static str> {
+    Some(match code {
+        "enm" => "Middle English",
+        "ang" => "Old English",
+        "dum" => "Middle Dutch",
+        "nl" => "Dutch",
+        "de" => "German",
+        "gmh" => "Middle High German",
+        "goh" => "Old High German",
+        "gem-pro" => "Proto-Germanic",
+        "la" => "Latin",
+        "it" => "Italian",
+        "fr" => "French",
+        "fro" => "Old French",
+        "frm" => "Middle French",
+        "grc" => "Ancient Greek",
+        "el" => "Greek",
+        "ine-pro" => "Proto-Indo-European",
+        "non" => "Old Norse",
+        "es" => "Spanish",
+        "pt" => "Portuguese",
+        "ar" => "Arabic",
+        "he" => "Hebrew",
+        "sa" => "Sanskrit",
+        "fa" => "Persian",
+        "ja" => "Japanese",
+        "zh" => "Chinese",
+        "hi" => "Hindi",
+        "ga" => "Irish",
+        "gd" => "Scottish Gaelic",
+        _ => return None,
     })
 }
 fn detect_origin_language(value: &str) -> Option<String> {
@@ -401,6 +443,14 @@ mod tests {
         );
     }
     #[test]
+    fn extracts_latin_origin_from_wiktionary_templates() {
+        let source = "===Etymology===\nFrom earlier [[nauseat]], from {{der|en|la|nauseātus}}, from {{m|la|nauseō}}, from {{der|en|grc|ναυσία}}.\n===Verb===";
+        let etymology = extract_etymology(source).unwrap();
+        assert!(etymology.contains("Latin"));
+        assert!(etymology.contains("Ancient Greek"));
+        assert_eq!(detect_origin_language(&etymology).as_deref(), Some("Latin"));
+    }
+    #[test]
     fn extracts_ipa_template() {
         assert_eq!(extract_ipa("{{IPA|en|/wɜːd/|a=US}}"), Some("wɜːd".into()))
     }
@@ -484,6 +534,43 @@ mod tests {
         assert_eq!(result.origin_language.as_deref(), Some("Middle English"));
     }
     #[tokio::test]
+    async fn enriches_nauseating_from_nauseate_latin_etymology() {
+        let server = MockServer::start().await;
+        Mock::given(method("GET"))
+            .and(path("/api/v2/entries/en/nauseating"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!([{
+                "phonetic":"/ˈnɔːzieɪtɪŋ/",
+                "meanings":[{"partOfSpeech":"adjective","definitions":[{"definition":"Causing nausea."}]}]
+            }])))
+            .mount(&server)
+            .await;
+        for (page, wikitext) in [
+            (
+                "nauseating",
+                "==English==\n===Adjective===\nCausing nausea.\n===Verb===\n{{infl of|en|nauseate||ing-form}}",
+            ),
+            (
+                "nauseate",
+                "==English==\n===Etymology===\nFrom [[nauseat]], from {{der|en|la|nauseātus}}, from {{der|en|grc|ναυσία}}.\n===Pronunciation===\n{{IPA|en|/ˈnɔziˌeɪt/}}\n===Verb===",
+            ),
+        ] {
+            Mock::given(method("GET"))
+                .and(path("/w/api.php"))
+                .and(query_param("page", page))
+                .respond_with(
+                    ResponseTemplate::new(200)
+                        .set_body_json(serde_json::json!({"parse":{"wikitext":wikitext}})),
+                )
+                .mount(&server)
+                .await;
+        }
+        let mut dictionary =
+            Dictionary::with_endpoints(JsonCache::disabled(), server.uri(), server.uri());
+        let result = dictionary.fetch("nauseating").await.unwrap();
+        assert_eq!(result.origin_language.as_deref(), Some("Latin"));
+        assert!(result.etymology.unwrap().contains("Latin"));
+    }
+    #[tokio::test]
     async fn follows_a_wiktionary_see_reference_for_enrichment() {
         let server = MockServer::start().await;
         Mock::given(method("GET"))
@@ -554,7 +641,7 @@ mod tests {
         let cache_path = dir.path().join("cache.json");
         let mut cache = JsonCache::open(Some(&cache_path)).unwrap();
         cache
-            .insert("v2:missing", &Option::<WordData>::None)
+            .insert("v3:missing", &Option::<WordData>::None)
             .unwrap();
         assert!(
             Dictionary::with_endpoints(cache, server.uri(), server.uri())
