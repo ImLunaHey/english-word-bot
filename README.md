@@ -3,7 +3,7 @@
 A low-memory Rust Bluesky bot. Posts a random English word every 10 minutes, rendered as
 a generated PNG with a stylised background. Words are drawn from the
 an embedded English frequency list and
-tracked in a local file so they never repeat.
+tracked in an atomically updated local file so they never repeat.
 
 ## Run it
 

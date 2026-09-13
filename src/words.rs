@@ -64,7 +64,20 @@ impl WordPool {
         }
         let mut values: Vec<_> = self.posted.iter().cloned().collect();
         values.sort();
-        fs::write(path, values.join("\n") + "\n")?;
+        if let Some(parent) = path
+            .parent()
+            .filter(|parent| !parent.as_os_str().is_empty())
+        {
+            fs::create_dir_all(parent)?;
+        }
+        let temporary = path.with_extension("tmp");
+        if let Err(error) = fs::write(&temporary, values.join("\n") + "\n")
+            .and_then(|()| fs::rename(&temporary, path))
+        {
+            self.posted.remove(word);
+            let _ = fs::remove_file(temporary);
+            return Err(error.into());
+        }
         Ok(())
     }
 
@@ -127,6 +140,24 @@ mod tests {
         p.mark_posted("one", &path).unwrap();
         p.mark_posted("one", &path).unwrap();
         assert_eq!(fs::read_to_string(path).unwrap(), "one\n");
+    }
+    #[test]
+    fn mark_creates_parent_directories_atomically() {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("state/posted.txt");
+        let mut pool = WordPool::new(["one".into()], []).unwrap();
+        pool.mark_posted("one", &path).unwrap();
+        assert_eq!(fs::read_to_string(&path).unwrap(), "one\n");
+        assert!(!path.with_extension("tmp").exists());
+    }
+    #[test]
+    fn failed_persistence_does_not_mark_word_in_memory() {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("posted");
+        fs::create_dir(&path).unwrap();
+        let mut pool = WordPool::new(["one".into()], []).unwrap();
+        assert!(pool.mark_posted("one", &path).is_err());
+        assert_eq!(pool.remaining(), 1);
     }
     #[test]
     fn reads_missing_posted_file() {
